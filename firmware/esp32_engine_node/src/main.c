@@ -1,9 +1,15 @@
+// External libraries
 #include <stdio.h> // printf
 #include "freertos/FreeRTOS.h" // 
-// #include "freertos/task.h" // 
-// #include "esp_system.h"
+#include "freertos/task.h" // 
+#include "esp_system.h"
 #include "driver/gpio.h" // gpio functions
 #include "esp_log.h" // ESP_LOGI
+#include "esp_timer.h" // esp_timer_get_time
+
+// private libraries & headers
+#include "common-defines.h"
+#include "display.h"
 
 #define LED_BUILTIN (GPIO_NUM_2)
 
@@ -13,7 +19,8 @@ void hello_task(void *pvParameter)
 {
     while (1)
     {
-        printf("Hello, World!\n");
+        printf("Time in microseconds %lld \n", esp_timer_get_time());
+        printf("Time in microseconds %lld \n", esp_timer_get_time());
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
@@ -47,4 +54,5 @@ void app_main()
     xTaskCreate(&blink_task, "blink_task", 2048, NULL, 5, NULL);
     xTaskCreate(&log_task, "log", 2048, NULL, 5, NULL);
     xTaskCreate(&hello_task, "hello", 1024, NULL, 5, NULL);
+    xTaskCreate(&display_example, "display", 2048, NULL, 5, NULL);
 }

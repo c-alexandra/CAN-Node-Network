@@ -22,48 +22,56 @@
 #include "freertos/task.h"
 // #include "freertos/semphr.h" // semaphore_handle_t
 
+// debug defines for code testing
+// #define DEBUG_DELAY
+
+// constants dictated by datasheet and borrowed from arduino liquidcrystal
 // commands
-#define LCD_CLEARDISPLAY 0x01
-#define LCD_RETURNHOME 0x02
-#define LCD_ENTRYMODESET 0x04
-#define LCD_DISPLAYCONTROL 0x08
-#define LCD_CURSORSHIFT 0x10
-#define LCD_FUNCTIONSET 0x20
-#define LCD_SETCGRAMADDR 0x40
-#define LCD_SETDDRAMADDR 0x80
+#define LCD_CLEARDISPLAY        (0x01)
+#define LCD_RETURNHOME          (0x02)
+#define LCD_ENTRYMODESET        (0x04)
+#define LCD_DISPLAYCONTROL      (0x08)
+#define LCD_CURSORSHIFT         (0x10)
+#define LCD_FUNCTIONSET         (0x20)
+#define LCD_SETCGRAMADDR        (0x40)
+#define LCD_SETDDRAMADDR        (0x80)
 
 // flags for display entry mode
-#define LCD_ENTRYRIGHT 0x00
-#define LCD_ENTRYLEFT 0x02
-#define LCD_ENTRYSHIFTINCREMENT 0x01
-#define LCD_ENTRYSHIFTDECREMENT 0x00
+#define LCD_ENTRYRIGHT          (0x00)
+#define LCD_ENTRYLEFT           (0x02)
+#define LCD_ENTRYSHIFTINCREMENT (0x01)
+#define LCD_ENTRYSHIFTDECREMENT (0x00)
 
 // flags for display on/off control
-#define LCD_DISPLAYON 0x04
-#define LCD_DISPLAYOFF 0x00
-#define LCD_CURSORON 0x02
-#define LCD_CURSOROFF 0x00
-#define LCD_BLINKON 0x01
-#define LCD_BLINKOFF 0x00
+#define LCD_DISPLAYON           (0x04)
+#define LCD_DISPLAYOFF          (0x00)
+#define LCD_CURSORON            (0x02)
+#define LCD_CURSOROFF           (0x00)
+#define LCD_BLINKON             (0x01)
+#define LCD_BLINKOFF            (0x00)
 
 // flags for display/cursor shift
-#define LCD_DISPLAYMOVE 0x08
-#define LCD_CURSORMOVE 0x00
-#define LCD_MOVERIGHT 0x04
-#define LCD_MOVELEFT 0x00
+#define LCD_DISPLAYMOVE         (0x08)
+#define LCD_CURSORMOVE          (0x00)
+#define LCD_MOVERIGHT           (0x04)
+#define LCD_MOVELEFT            (0x00)
 
 // flags for function set
-#define LCD_8BITMODE 0x10
-#define LCD_4BITMODE 0x00
-#define LCD_2LINE 0x08
-#define LCD_1LINE 0x00
-#define LCD_5x10DOTS 0x04
-#define LCD_5x8DOTS 0x00
+#define LCD_8BITMODE            (0x10)
+#define LCD_4BITMODE            (0x00)
+#define LCD_2LINE               (0x08)
+#define LCD_1LINE               (0x00)
+#define LCD_5x10DOTS            (0x04)
+#define LCD_5x8DOTS             (0x00)
 
 // Display dimensions
-#define LCD_ROWS                    2
-#define LCD_COLS                    16
-#define LCD_TOTAL_CHARS             (LCD_ROWS * LCD_COLS)
+#define LCD_ROWS                (2)
+#define LCD_COLS                (16)
+#define LCD_TOTAL_CHARS         (LCD_ROWS * LCD_COLS)
+
+// Row addresses for DDRAM
+#define LCD_ROW0_ADDR               0x00
+#define LCD_ROW1_ADDR               0x40
 
 static const char *TAG = "lcd16x2"; // defined for log, per .c file
 
@@ -122,9 +130,11 @@ static esp_err_t lcd_write_data(lcd16x2_handle_t handle, uint8_t data);
 static esp_err_t lcd_write_4bit(lcd16x2_handle_t handle, uint8_t data);
 static esp_err_t lcd_write_8bit(lcd16x2_handle_t handle, uint8_t data);
 static void lcd_pulse_enable(lcd16x2_handle_t handle);
+static void lcd_gpio_set_level_fast(gpio_num_t pin, int level);
 
 static void lcd_delay_us(uint32_t us);
 static void lcd_delay_ms(uint32_t ms);
+static esp_err_t lcd_validate_position(uint8_t row, uint8_t col);
 
 /*******************************************************************************
  * PUBLIC FUNCTION IMPLEMENTATIONS
@@ -215,7 +225,6 @@ esp_err_t lcd16x2_init(const lcd16x2_config_t *config, lcd16x2_handle_t *handle)
     return ESP_OK;
 }
 
-
 /** 
  * @brief Validate GPIO pins for LCD configuration.
  * 
@@ -249,6 +258,142 @@ esp_err_t lcd16x2_validate_pins(const gpio_num_t *pins, size_t count) {
     return ESP_OK;
 }
 
+/**
+ * @brief Write a single character to the LCD display.
+ * 
+ * This function writes a character to the current cursor position on the LCD.
+ * It updates the internal display buffer and cursor position accordingly.
+ * 
+ * @param handle LCD handle.
+ * @param character Character to write.
+ * @return esp_err_t ESP_OK on success, error code otherwise.
+ */
+esp_err_t lcd16x2_write_char(lcd16x2_handle_t handle, char character) {
+    LCD16X2_CHECK_HANDLE(handle); // verifyy handle is valid and initialized
+
+    if (xSemaphoreTake(handle->mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    esp_err_t ret = lcd_write_data(handle, (uint8_t)(character));
+    if (ret == ESP_OK) {
+        // Update display buffer and cursor position
+        // TODO: Update with bit manipulation and modulo to handle wrap-around
+        if (handle->current_col < LCD_COLS && handle->current_row < LCD_ROWS) {
+            handle->display_buffer[handle->current_row * LCD_COLS + handle->current_col] = character;
+            handle->current_col++;
+            if (handle->current_col >= LCD_COLS) {
+                handle->current_col = 0;
+                handle->current_row = (handle->current_row + 1) % LCD_ROWS; // Wrap to next row
+            }
+        }
+    }
+
+    xSemaphoreGive(handle->mutex);
+    return ret;
+}
+
+/**
+ * @brief Write a string to the LCD display.
+ * 
+ * @param handle LCD handle.
+ * @param str Null-terminated string to write.
+ * @return esp_err_t ESP_OK on success, error code otherwise.
+ */
+esp_err_t lcd16x2_write_string(lcd16x2_handle_t handle, const char *str) {
+    LCD16X2_CHECK_HANDLE(handle);
+    LCD16X2_CHECK(str != NULL, ESP_ERR_INVALID_ARG, "String is NULL");
+
+    // iterate until end of string, validating each character
+    esp_err_t ret = ESP_OK;
+    for (const char *p = str; *p != '\0' && ret == ESP_OK; p++) {
+        ret = lcd16x2_write_char(handle, *p);
+    }
+
+    return ret;
+}
+
+/**
+ * @brief Write a string to the LCD at a specific row and column.
+ * 
+ * This function sets the cursor to the specified position and writes the string.
+ * It handles cursor positioning and ensures the string fits within the display bounds.
+ * 
+ * @param handle LCD handle.
+ * @param row Row index (0 or 1).
+ * @param col Column index (0 to 15).
+ * @param str String to write.
+ * @return esp_err_t ESP_OK on success, error code otherwise.
+ */
+esp_err_t lcd16x2_write_string_at(lcd16x2_handle_t handle, uint8_t row, 
+                                  uint8_t col, const char *str) {
+    esp_err_t ret = lcd16x2_set_cursor(handle, row, col);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    
+    return lcd16x2_write_string(handle, str);
+}
+
+/** 
+ * @brief Set the cursor position on the LCD.
+ * 
+ * @param handle LCD handle.
+ * @param row Row position (0-1).
+ * @param col Column position (0-15).
+ * @return esp_err_t ESP_OK on success, error code otherwise.
+ */
+esp_err_t lcd16x2_set_cursor(lcd16x2_handle_t handle, uint8_t row, uint8_t col) {
+    LCD16X2_CHECK_HANDLE(handle);
+    ESP_RETURN_ON_ERROR(lcd_validate_position(row, col), TAG, "Invalid cursor position");
+
+    if (xSemaphoreTake(handle->mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    uint8_t cursor_address = (row == 0) ? LCD_ROW0_ADDR : LCD_ROW1_ADDR;
+    cursor_address += col;
+
+    esp_err_t ret = lcd_write_command(handle, LCD_SETDDRAMADDR | cursor_address);
+    if (ret == ESP_OK) {
+        handle->current_row = row;
+        handle->current_col = col;
+    }
+
+    xSemaphoreGive(handle->mutex);
+    return ret;
+}
+
+/**
+ * @brief Clear the LCD display and reset cursor position.
+ * 
+ * This function clears the display, resets the cursor to the home position,
+ * and updates the internal display buffer.
+ * 
+ * @param handle LCD handle.
+ * @return esp_err_t ESP_OK on success, error code otherwise.
+ */
+esp_err_t lcd16x2_clear(lcd16x2_handle_t handle) {
+    LCD16X2_CHECK_HANDLE(handle);
+
+    if (xSemaphoreTake(handle->mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    esp_err_t ret = lcd_write_command(handle, LCD_CLEARDISPLAY);
+    if (ret == ESP_OK) {
+        lcd_delay_ms(handle->timing.clear_delay_ms); // clear takes a long time
+
+        // Reset cursor position
+        handle->current_row = 0;
+        handle->current_col = 0;
+        memset(handle->display_buffer, ' ', LCD_TOTAL_CHARS); // Clear display buffer
+    }
+
+    xSemaphoreGive(handle->mutex);
+    return ret;
+}
+
 /*******************************************************************************
  * PRIVATE FUNCTION IMPLEMENTATIONS
  ******************************************************************************/
@@ -260,17 +405,21 @@ esp_err_t lcd16x2_validate_pins(const gpio_num_t *pins, size_t count) {
  * @return esp_err_t ESP_OK on success, error code otherwise.
  */
 esp_err_t lcd_gpio_init(lcd16x2_handle_t handle) {
-    // LCD16X2_CHECK_HANDLE(handle);
-
     // Configure RS, RW, Enable pins
     gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << handle->rs_pin),
+        .pin_bit_mask = (1ULL << handle->rs_pin) | (1ULL << handle->enable_pin),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE
     };
     ESP_RETURN_ON_ERROR(gpio_config(&io_conf), TAG, "Failed to configure control pins");
+
+    // Configure RW pin if not NC
+    if (handle->rw_pin != GPIO_NUM_NC) {
+        io_conf.pin_bit_mask |= (1ULL << handle->rw_pin);
+        ESP_RETURN_ON_ERROR(gpio_config(&io_conf), TAG, "Failed to configure RW pin");
+    }
 
     // Configure data pins
     uint64_t data_pin_mask = 0;
@@ -292,7 +441,9 @@ esp_err_t lcd_gpio_init(lcd16x2_handle_t handle) {
 
     // Initialize all pins LOW
     gpio_set_level(handle->rs_pin, 0);
-    gpio_set_level(handle->rw_pin, 0);
+    if (handle->rw_pin != GPIO_NUM_NC) {
+        gpio_set_level(handle->rw_pin, 0);
+    }
     gpio_set_level(handle->enable_pin, 0);
 
     for (int i = 0; i < 8; i++) {
@@ -313,7 +464,9 @@ esp_err_t lcd_gpio_init(lcd16x2_handle_t handle) {
 esp_err_t lcd_gpio_deinit(lcd16x2_handle_t handle) {
     // Reset RS, RW, Enable pins
     gpio_reset_pin(handle->rs_pin);
-    gpio_reset_pin(handle->rw_pin);
+    if (handle->rw_pin != GPIO_NUM_NC) {
+        gpio_reset_pin(handle->rw_pin);
+    }
     gpio_reset_pin(handle->enable_pin);
 
     // Reset data pins
@@ -338,8 +491,6 @@ esp_err_t lcd_gpio_deinit(lcd16x2_handle_t handle) {
  * @return esp_err_t ESP_OK on success, error code otherwise.
  */
 esp_err_t lcd_hardware_init(lcd16x2_handle_t handle) {
-    // LCD16X2_CHECK_HANDLE(handle);
-
     // Power-on delay determined by datasheet. MCU will be ready before lcd 
     // without this.
     lcd_delay_ms(handle->timing.init_delay_ms);
@@ -354,6 +505,7 @@ esp_err_t lcd_hardware_init(lcd16x2_handle_t handle) {
         lcd_delay_us(150); // wait >100us
         ESP_RETURN_ON_ERROR(lcd_write_4bit(handle, 0x03), TAG, "Failed to send third 4-bit init command");
         lcd_delay_us(150);
+
         ESP_RETURN_ON_ERROR(lcd_write_4bit(handle, 0x02), TAG, "Failed to set 4-bit mode");
 
         // Function set: 4-bit, 2 line, 5x8 dots
@@ -367,6 +519,7 @@ esp_err_t lcd_hardware_init(lcd16x2_handle_t handle) {
         lcd_delay_ms(5); // wait >4.1ms
         ESP_RETURN_ON_ERROR(lcd_write_command(handle, LCD_FUNCTIONSET | LCD_8BITMODE | LCD_2LINE | LCD_5x8DOTS), TAG, "Failed to set function");
         lcd_delay_us(150); // wait >100us
+
         ESP_RETURN_ON_ERROR(lcd_write_command(handle, LCD_FUNCTIONSET | LCD_8BITMODE | LCD_2LINE | LCD_5x8DOTS), TAG, "Failed to set function");
         lcd_delay_us(150);
     }
@@ -394,16 +547,11 @@ esp_err_t lcd_hardware_init(lcd16x2_handle_t handle) {
  * @return esp_err_t ESP_OK on success, error code otherwise.
  */
 esp_err_t lcd_write_command(lcd16x2_handle_t handle, uint8_t command) {
-    LCD16X2_CHECK_HANDLE(handle);
-
-    // Acquire mutex for thread safety
-    if (xSemaphoreTake(handle->mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
-        return ESP_ERR_TIMEOUT;
-    }
-
     // Set RS and RW pins for command mode
     gpio_set_level(handle->rs_pin, 0); // RS = 0 for command
-    gpio_set_level(handle->rw_pin, 0); // RW = 0 for write
+    if (handle->rw_pin != GPIO_NUM_NC){
+        gpio_set_level(handle->rw_pin, 0); // RW = 0 for write
+    }   
 
     // Write command based on mode
     if (handle->mode == LCD16X2_BITMODE_4) {
@@ -413,8 +561,8 @@ esp_err_t lcd_write_command(lcd16x2_handle_t handle, uint8_t command) {
         ESP_RETURN_ON_ERROR(lcd_write_8bit(handle, command), TAG, "Failed to write 8-bit command");
     }
 
-    lcd_delay_us(handle->timing.command_delay_us);
-    xSemaphoreGive(handle->mutex); // Release mutex
+    lcd_delay_us(handle->timing.command_delay_us); // Delay for command processing
+
     return ESP_OK;
 }
 
@@ -427,11 +575,8 @@ esp_err_t lcd_write_command(lcd16x2_handle_t handle, uint8_t command) {
  */
 static esp_err_t lcd_write_data(lcd16x2_handle_t handle, uint8_t data) {
     gpio_set_level(handle->rs_pin, 1); // RS = 1 for data
-    gpio_set_level(handle->rw_pin, 0); // RW = 0 for write
-
-    // Acquire mutex for thread safety
-    if (xSemaphoreTake(handle->mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
-        return ESP_ERR_TIMEOUT;
+    if (handle->rw_pin != GPIO_NUM_NC) {
+        gpio_set_level(handle->rw_pin, 0); // RW = 0 for write
     }
 
     // Write data based on mode
@@ -442,20 +587,57 @@ static esp_err_t lcd_write_data(lcd16x2_handle_t handle, uint8_t data) {
         ESP_RETURN_ON_ERROR(lcd_write_8bit(handle, data), TAG, "Failed to write 8-bit data");
     }
 
-    lcd_delay_us(handle->timing.command_delay_us);
-    xSemaphoreGive(handle->mutex); // Release mutex
     return ESP_OK;
 }
 
-static void lcd_pulse_enable(lcd16x2_handle_t handle) {
-    // TODO: Implement fast GPIO DMA
-    // lcd_gpio_set_level_fast(handle->enable_pin, 1);
-    // lcd_delay_us(handle->timing.enable_pulse_us);
-    // lcd_gpio_set_level_fast(handle->enable_pin, 0);
+// TODO: Test and validate this function works as expected, them implement in 
+// place of gpio_set_level in other functions
+/**
+ * @brief Set GPIO pin level quickly using direct register manipulation.
+ * 
+ * This function sets the GPIO pin level using direct register access for
+ * improved performance over the standard gpio_set_level function.
+ * 
+ * @param pin GPIO pin number to set.
+ * @param level Level to set (0 or 1).
+ */
+static void lcd_gpio_set_level_fast(gpio_num_t pin, int level) {
+    if (level) {
+        if (pin < 32) {
+            GPIO.out_w1ts = (1 << pin); // Set pin high
+        } else {
+            GPIO.out1_w1ts.val = (1U << (pin - 32)); // Set pin high for pins > 31
+        }
+        GPIO.out_w1ts = (1 << pin); // Set pin high
+    } else {
+        if (pin < 32) {
+            GPIO.out_w1tc = (1 << pin); // Set pin low
+        } else {
+            GPIO.out1_w1tc.val = (1U << (pin - 32)); // Set pin low for pins > 31
+        }
+    }
+}
 
-    gpio_set_level(handle->enable_pin, 1); // Set Enable pin high
-    lcd_delay_us(handle->timing.enable_pulse_us); // Wait for pulse width
-    gpio_set_level(handle->enable_pin, 0); // Set Enable pin low
+/**
+ * @brief Pulse the Enable pin with fast delay.
+ * 
+ * @param handle LCD handle.
+ */
+static void lcd_pulse_enable(lcd16x2_handle_t handle) {
+#ifndef DEBUG_DELAY // TODO: Remove
+    lcd_gpio_set_level_fast(handle->enable_pin, 1);
+    lcd_delay_us(handle->timing.enable_pulse_us);
+    lcd_gpio_set_level_fast(handle->enable_pin, 0);
+#else
+    // TODO: remove - having a lot of problems with enable pulse width 
+    // vTaskDelay(pdMS_TO_TICKS(1)); 
+    // gpio_set_level(handle->enable_pin, 0);
+    // lcd_delay_us(handle->timing.enable_pulse_us);
+    gpio_set_level(handle->enable_pin, 1); 
+    lcd_delay_us(handle->timing.enable_pulse_us);
+    gpio_set_level(handle->enable_pin, 0); 
+    // vTaskDelay(pdMS_TO_TICKS(1));
+#endif
 }
 
 /**
@@ -468,8 +650,7 @@ static void lcd_pulse_enable(lcd16x2_handle_t handle) {
 static esp_err_t lcd_write_4bit(lcd16x2_handle_t handle, uint8_t data) {
     // set data pins
     for (int i = 0; i < 4; i++) {
-        gpio_set_level(handle->data_pins[i + 4], (data >> i) & 0x01);
-    }
+    lcd_gpio_set_level_fast(handle->data_pins[4 + i], (data >> i) & 0x01);    }
 
     lcd_pulse_enable(handle); // Pulse the enable pin to latch data
     return ESP_OK;
@@ -539,4 +720,18 @@ static void lcd_delay_ms(uint32_t ms) {
     }
 }
 
+/**
+ * @brief Validate cursor position.
+ * 
+ * @param row Row index (0 or 1).
+ * @param col Column index (0 to 15).
+ * @return esp_err_t ESP_OK if position is valid, error code otherwise.
+ */
+static esp_err_t lcd_validate_position(uint8_t row, uint8_t col) {
+    LCD16X2_CHECK(row < LCD_ROWS, ESP_ERR_LCD_INVALID_POSITION, 
+                  "Row %d out of range (0-%d)", row, LCD_ROWS - 1);
+    LCD16X2_CHECK(col < LCD_COLS, ESP_ERR_LCD_INVALID_POSITION, 
+                  "Column %d out of range (0-%d)", col, LCD_COLS - 1);
+    return ESP_OK;
+}
 

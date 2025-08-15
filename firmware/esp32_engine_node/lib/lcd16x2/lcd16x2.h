@@ -33,11 +33,17 @@ extern "C" {
 /*******************************************************************************
  * PREPROCESSOR DIRECTIVES
  ******************************************************************************/
+/**
+ * pulse recommended minimum 1µs as per datasheet
+ * delay after commands minimum 37µs
+ * delay after clear command minimum 1.52ms
+ * initial power-on delay minimum 15ms
+ */
 #define LCD16X2_DEFAULT_TIMING() { \
-    .enable_pulse_us = 1, \
-    .command_delay_us = 37, \
-    .clear_delay_ms = 2, \
-    .init_delay_ms = 50 \
+    .enable_pulse_us = 35, \
+    .command_delay_us = 50, \
+    .clear_delay_ms = 10, \
+    .init_delay_ms = 20 \
 }
 
 // LCD Error Codes 
@@ -84,15 +90,21 @@ typedef struct lcd16x2_s *lcd16x2_handle_t;
 /*******************************************************************************
  * FUNCTION PROTOTYPES
  ******************************************************************************/
+// initialization and cleanup
 esp_err_t lcd16x2_init(const lcd16x2_config_t *config, lcd16x2_handle_t *handle);
+
+// text output
+esp_err_t lcd16x2_write_char(lcd16x2_handle_t handle, char character);
+esp_err_t lcd16x2_write_string(lcd16x2_handle_t handle, const char *str);
+esp_err_t lcd16x2_write_string_at(lcd16x2_handle_t handle, uint8_t row, 
+                                  uint8_t col, const char *str);
+
+// display control
+esp_err_t lcd16x2_clear(lcd16x2_handle_t handle);
+esp_err_t lcd16x2_set_cursor(lcd16x2_handle_t handle, uint8_t row, uint8_t col);
+
+// utility functions
 esp_err_t lcd16x2_validate_pins(const gpio_num_t *pins, size_t pin_count);
-// void lcd16x2_teardown(lcd16x2_handle_t handle);
-
-// void lcd16x2_print(lcd16x2_handle_t handle, const char*);
-// void lcd16x2_clear(lcd16x2_handle_t handle);
-// void lcd16x2_home(lcd16x2_handle_t handle);
-
-// void lcd16x2_example(void *pvParamater);
 
 #ifdef __cplusplus
 }

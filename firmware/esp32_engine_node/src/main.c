@@ -11,6 +11,7 @@
 // #include "common-defines.h"
 // #include "display.h"
 #include "lcd16x2.h"
+#include "display.h"
 
 #define LED_BUILTIN (GPIO_NUM_2)
 
@@ -30,6 +31,7 @@
 #define BACKLIGHT_ENABLE true
 #define BIT_MODE LCD16X2_BITMODE_4
 
+// TODO: refactor to proper test code
 static void example_basic_lcd_usage(void* pvParameter) {
     lcd16x2_handle_t lcd_handle;
     lcd16x2_config_t lcd_config = {
@@ -46,13 +48,18 @@ static void example_basic_lcd_usage(void* pvParameter) {
 
     esp_err_t ret = lcd16x2_init(&lcd_config, &lcd_handle);
     if (ret != ESP_OK) {
-        ESP_LOGE("LCD", "Failed to initialize LCD: %s", esp_err_to_name(ret));
+        ESP_LOGE("LCD", "Failed to initialize example lcd: %s", esp_err_to_name(ret));
         return;
     }
 
     while (1) {
         ESP_LOGI("LCD", "Should be writing to LCD");
-        vTaskDelay(1000 / portTICK_PERIOD_MS); // Delay for 10 seconds
+        // lcd16x2_write_string(lcd_handle, "Hello, World!");
+        lcd16x2_write_string_at(lcd_handle, 0, 0, "Hello, World!");
+        lcd16x2_write_string_at(lcd_handle, 1, 1, "LCD Example");
+        vTaskDelay(1000 / portTICK_PERIOD_MS); // Delay for 1 seconds
+        lcd16x2_clear(lcd_handle); // Clear the display
+        vTaskDelay(1000 / portTICK_PERIOD_MS); // Delay for 1
     }
 
     // // Clear the display
@@ -68,11 +75,27 @@ static void example_basic_lcd_usage(void* pvParameter) {
     // lcd16x2_deinit(lcd_handle);
 }
 
+void blink_task(void *pvParameter)
+{
+    gpio_reset_pin(LED_BUILTIN); // configure as gpio
+    gpio_set_direction(LED_BUILTIN, GPIO_MODE_OUTPUT);
+
+    while (1)
+    {
+        gpio_set_level(LED_BUILTIN, 0);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+        gpio_set_level(LED_BUILTIN, 1);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+}
+
 
 void app_main()
 {
     xTaskCreate(&example_basic_lcd_usage, "lcd_example", 4096, NULL, 5, NULL);
-    // xTaskCreate(&blink_task, "blink_task", 2048, NULL, 5, NULL);
+    xTaskCreate(&blink_task, "blink_task", 2048, NULL, 5, NULL);
+    // xTaskCreate(&display_example, "display_example", 2048, NULL, 5, NULL);
     // xTaskCreate(&log_task, "log", 2048, NULL, 5, NULL);
     // xTaskCreate(&hello_task, "hello", 1024, NULL, 5, NULL);
     // xTaskCreate(&display_example, "display", 2048, NULL, 5, NULL);

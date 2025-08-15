@@ -11,7 +11,6 @@
 // #include "common-defines.h"
 // #include "display.h"
 #include "lcd16x2.h"
-#include "display.h"
 
 #define LED_BUILTIN (GPIO_NUM_2)
 
@@ -54,12 +53,10 @@ static void example_basic_lcd_usage(void* pvParameter) {
 
     while (1) {
         ESP_LOGI("LCD", "Should be writing to LCD");
-        // lcd16x2_write_string(lcd_handle, "Hello, World!");
         lcd16x2_write_string_at(lcd_handle, 0, 0, "Hello, World!");
-        lcd16x2_write_string_at(lcd_handle, 1, 1, "LCD Example");
-        vTaskDelay(1000 / portTICK_PERIOD_MS); // Delay for 1 seconds
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
         lcd16x2_clear(lcd_handle); // Clear the display
-        vTaskDelay(1000 / portTICK_PERIOD_MS); // Delay for 1
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 
     // // Clear the display

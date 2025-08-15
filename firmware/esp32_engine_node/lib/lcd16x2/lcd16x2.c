@@ -716,7 +716,7 @@ static void lcd_delay_us(uint32_t us) {
  */
 static void lcd_delay_ms(uint32_t ms) {
     if (ms > 0) {
-        vTaskDelay(pdMS_TO_TICKS(ms)); // Use FreeRTOS delay for millisecond precision
+        vTaskDelay(ms / portTICK_PERIOD_MS); // Use FreeRTOS delay for millisecond precision
     }
 }
 

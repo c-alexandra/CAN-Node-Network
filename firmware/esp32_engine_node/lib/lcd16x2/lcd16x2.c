@@ -25,6 +25,9 @@
 // debug defines for code testing
 // #define DEBUG_DELAY
 
+/*******************************************************************************
+ * PRIVATE CONSTANTS & MACROS
+ ******************************************************************************/
 // constants dictated by datasheet and borrowed from arduino liquidcrystal
 // commands
 #define LCD_CLEARDISPLAY        (0x01)
@@ -73,8 +76,6 @@
 #define LCD_ROW0_ADDR               0x00
 #define LCD_ROW1_ADDR               0x40
 
-static const char *TAG = "lcd16x2"; // defined for log, per .c file
-
 // Validation macros
 #define LCD16X2_CHECK(condition, err_code, format, ...) do { \
     if (!(condition)) { \
@@ -87,6 +88,11 @@ static const char *TAG = "lcd16x2"; // defined for log, per .c file
 #define LCD16X2_CHECK_HANDLE(handle) \
     LCD16X2_CHECK(handle != NULL, ESP_ERR_INVALID_ARG, "Handle is NULL"); \
     LCD16X2_CHECK(handle->initialized, ESP_ERR_LCD_NOT_INITIALIZED, "LCD not initialized")
+
+/*******************************************************************************
+ * PRIVATE TYPE DEFINITIONS
+ ******************************************************************************/
+static const char *TAG = "lcd16x2"; // defined for log, per .c file
 
 typedef struct lcd16x2_s {
     // Hardware configuration

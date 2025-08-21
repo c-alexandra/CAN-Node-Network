@@ -53,7 +53,6 @@ extern "C" {
 #define ESP_ERR_LCD_NOT_INITIALIZED     (ESP_ERR_LCD_BASE + 3)
 #define ESP_ERR_LCD_GPIO_CONFIG         (ESP_ERR_LCD_BASE + 4)
 #define ESP_ERR_LCD_TIMEOUT             (ESP_ERR_LCD_BASE + 5)
-
 /*******************************************************************************
  * TYPE DEFINITIONS
  ******************************************************************************/

@@ -1,9 +1,9 @@
 #include "common-defines.h"
 #include "temp_sensor.h"
 
-void example_temp_sensor(void* pvParameter) {
-    const char* TAG = "temp_sensor";
+static const char* TAG = "temp_sensor_task";
 
+void example_temp_sensor(void* pvParameter) {
     temp_sensor_handle_t temp_handle;
     temp_sensor_config_t temp_config = {
         .v_out_pin = GPIO_NUM_39,

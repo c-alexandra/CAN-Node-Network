@@ -97,6 +97,7 @@ esp_err_t lcd16x2_write_char(lcd16x2_handle_t handle, char character);
 esp_err_t lcd16x2_write_string(lcd16x2_handle_t handle, const char *str);
 esp_err_t lcd16x2_write_string_at(lcd16x2_handle_t handle, uint8_t row, 
                                   uint8_t col, const char *str);
+esp_err_t lcd16x2_printf(lcd16x2_handle_t handle, const char* format, ...);
 
 // display control
 esp_err_t lcd16x2_clear(lcd16x2_handle_t handle);

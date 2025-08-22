@@ -341,6 +341,31 @@ esp_err_t lcd16x2_write_string_at(lcd16x2_handle_t handle, uint8_t row,
     return lcd16x2_write_string(handle, str);
 }
 
+/**
+ * @brief echoes std printf for displaying formatted strings on the LCD
+ * 
+ * @param handle LCD handle
+ * @param format format specifier for string conversion
+ * @param 
+ * @return esp_err_t RET_OK on success, error code otherwise
+ */
+esp_err_t lcd16x2_printf(lcd16x2_handle_t handle, const char* format, ...) {
+    LCD16X2_CHECK_HANDLE(handle);
+    LCD16X2_CHECK(format != NULL, ESP_ERR_INVALID_ARG, "Format string is NULL");
+    
+    char buffer[LCD_TOTAL_CHARS + 1];
+    va_list args;
+    va_start(args, format);
+    int len = vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+    
+    if (len < 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    return lcd16x2_write_string(handle, buffer);
+}
+
 /** 
  * @brief Set the cursor position on the LCD.
  * 

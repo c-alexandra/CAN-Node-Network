@@ -21,7 +21,6 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_continuous.h"
 #include "esp_adc/adc_cali.h"
-#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "esp_check.h"
@@ -136,7 +135,9 @@ typedef struct temp_sensor_s *temp_sensor_handle_t;
 esp_err_t temp_sensor_init(const temp_sensor_config_t *config, 
     temp_sensor_handle_t *handle);
 
-esp_err_t temp_sensor_read(temp_sensor_handle_t handle, float *temperature);
+esp_err_t temp_sensor_read(temp_sensor_handle_t handle, float* temperature);
+
+esp_err_t temp_sensor_read_filtered(temp_sensor_handle_t handle, float* temperature);
 
 esp_err_t temp_sensor_get_stats(temp_sensor_handle_t handle, temp_sensor_stats_t* stats);
 

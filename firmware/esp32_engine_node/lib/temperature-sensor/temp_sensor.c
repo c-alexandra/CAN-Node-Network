@@ -78,6 +78,8 @@ static esp_err_t read_adc_voltage(temp_sensor_handle_t handle, int* mv_voltage);
 static void update_statistics(temp_sensor_handle_t handle, float temperature);
 static float convert_voltage_to_temperature(temp_sensor_handle_t handle, int voltage_mv);
 static esp_err_t calculate_ntc_temperature(int voltage_mv, const temp_sensor_ntc_config_t* config);
+static float median_filter(float *buffer, uint8_t count);
+static float apply_filter(temp_sensor_handle_t handle, float temperature);
 
 /*******************************************************************************
  * PUBLIC FUNCTION IMPLEMENTATIONS
@@ -158,10 +160,10 @@ esp_err_t temp_sensor_init(const temp_sensor_config_t *config,
 esp_err_t temp_sensor_deinit(temp_sensor_handle_t handle) {
     TEMP_SENS_CHECK_HANDLE(handle);
 
-    // stop continuous mode if running 
-    if (handle->continuous_running) {
-        temp_sensor_stop_continuous(handle);
-    }
+    // // stop continuous mode if running 
+    // if (handle->continuous_running) {
+    //     temp_sensor_stop_continuous(handle);
+    // }
 
     // take mutex
     if (xSemaphoreTake(handle->mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
@@ -181,6 +183,80 @@ esp_err_t temp_sensor_deinit(temp_sensor_handle_t handle) {
     free(handle);
 
     ESP_LOGI(TAG, "Temperature sensor deinitialized");
+    return ESP_OK;
+}
+
+esp_err_t temp_sensor_read_filtered(temp_sensor_handle_t handle, float* temperature) {
+    TEMP_SENS_CHECK_HANDLE(handle);
+    TEMP_SENS_CHECK(temperature != NULL, ESP_ERR_INVALID_ARG, "Temperature pointer is NULL");
+    
+    // If no filtering configured, just do single read
+    if (handle->sensor_config.filter_type == TEMP_FILTER_NONE) {
+        return temp_sensor_read(handle, temperature);
+    }
+    
+    if (xSemaphoreTake(handle->mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    
+    // Read new temperature value
+    float new_temp;
+    esp_err_t ret = ESP_OK;
+    
+    // For median filter, need to fill buffer first
+    if (handle->sensor_config.filter_type == TEMP_FILTER_MEDIAN) {
+        for (uint8_t i = 0; i < handle->sensor_config.avg_samples; i++) {
+            int voltage_mv;
+            ret = read_adc_voltage(handle, &voltage_mv);
+            if (ret != ESP_OK) break;
+            
+            float temp = convert_voltage_to_temperature(handle, voltage_mv);
+            temp = (temp * handle->sensor_config.calibration_scale) + handle->sensor_config.calibration_offset;
+            handle->filter_buffer[i] = temp;
+            vTaskDelay(pdMS_TO_TICKS(1)); // Small delay between samples
+        }
+        if (ret == ESP_OK) {
+            new_temp = median_filter(handle->filter_buffer, handle->sensor_config.avg_samples);
+        }
+    } else {
+        // Read single value for other filter types
+        int voltage_mv;
+        ret = read_adc_voltage(handle, &voltage_mv);
+        if (ret == ESP_OK) {
+            new_temp = convert_voltage_to_temperature(handle, voltage_mv);
+            new_temp = (new_temp * handle->sensor_config.calibration_scale) + 
+                      handle->sensor_config.calibration_offset;
+        }
+    }
+    
+    if (ret != ESP_OK) {
+        handle->stats.error_count++;
+        xSemaphoreGive(handle->mutex);
+        return ret;
+    }
+    
+    // Apply filter
+    float filtered_temp = apply_filter(handle, new_temp);
+    
+    // Validate temperature range
+    if (filtered_temp < TEMP_SENSOR_MIN_VALID || filtered_temp > TEMP_SENSOR_MAX_VALID) {
+        handle->stats.error_count++;
+        xSemaphoreGive(handle->mutex);
+        return ESP_ERR_TEMP_OUT_OF_RANGE;
+    }
+    
+    // Update statistics
+    update_statistics(handle, filtered_temp);
+    
+    // Check alerts
+    // check_alerts(handle, filtered_temp);
+    
+    *temperature = filtered_temp;
+    handle->filtered_value = filtered_temp;
+    handle->stats.curr_temp = filtered_temp;
+    handle->stats.last_update_time = esp_timer_get_time();
+    
+    xSemaphoreGive(handle->mutex);
     return ESP_OK;
 }
 
@@ -370,4 +446,95 @@ static float convert_voltage_to_temperature(temp_sensor_handle_t handle, int vol
     }
 
     return temperature;
+}
+
+static float median_filter(float *buffer, uint8_t count) {
+    // temporary sorted buffer
+    // float* sorted = malloc(count * sizeof(float));
+    float sorted[count];
+
+    // if (sorted == NULL) {
+    //     return buffer[0];
+    // }
+    
+    memcpy(sorted, buffer, count * sizeof(float));
+    
+    // simple bubble sort for small arrays
+    for (uint8_t i = 0; i < count - 1; i++) {
+        for (uint8_t j = 0; j < count - i - 1; j++) {
+            if (sorted[j] > sorted[j + 1]) {
+                float temp = sorted[j];
+                sorted[j] = sorted[j + 1];
+                sorted[j + 1] = temp;
+            }
+        }
+    }
+    
+    // Get median
+    float median;
+    if (count % 2 == 0) {
+        median = (sorted[count/2 - 1] + sorted[count/2]) / 2.0f;
+    } else {
+        median = sorted[count/2];
+    }
+    
+    // free(sorted);
+    return median;
+}
+
+static void continuous_task(void *pvParameter) {
+    temp_sensor_handle_t handle = (temp_sensor_handle_t)pvParameter;
+    float temperature;
+    
+    ESP_LOGI(TAG, "Continuous monitoring task started");
+    
+    while (handle->continuous_running) {
+        // read temperature with filtering
+        esp_err_t ret = temp_sensor_read_filtered(handle, &temperature);
+        if (ret == ESP_OK) {
+            ESP_LOGD(TAG, "Temperature: %.2f°C", temperature);
+        } else {
+            ESP_LOGW(TAG, "Failed to read temperature: %s", esp_err_to_name(ret));
+        }
+        
+        // Wait for next sample
+        vTaskDelay(pdMS_TO_TICKS(handle->sensor_config.sample_rate_ms));
+    }
+    
+    ESP_LOGI(TAG, "Continuous monitoring task ended");
+    vTaskDelete(NULL);
+}
+
+static float apply_filter(temp_sensor_handle_t handle, float new_value) {
+    float filtered_value = new_value;
+    
+    switch (handle->sensor_config.filter_type) {
+        case TEMP_FILTER_NONE:
+            filtered_value = new_value;
+            break;
+            
+        case TEMP_FILTER_MOVING_AVG:
+            // add to buffer
+            handle->filter_buffer[handle->filter_index] = new_value;
+            handle->filter_index = (handle->filter_index + 1) % handle->sensor_config.avg_samples;
+            
+            if (handle->filter_count < handle->sensor_config.avg_samples) {
+                handle->filter_count++;
+            }
+            
+            // calculate average
+            float sum = 0;
+            for (uint8_t i = 0; i < handle->filter_count; i++) {
+                sum += handle->filter_buffer[i];
+            }
+            filtered_value = sum / handle->filter_count;
+            break;
+            
+        case TEMP_FILTER_MEDIAN:
+            // median filter already applied in read_filtered
+            filtered_value = new_value;
+            break;
+    }
+    
+    return filtered_value;
 }

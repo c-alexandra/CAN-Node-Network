@@ -18,7 +18,4 @@ void app_main()
     xTaskCreate(&example_basic_lcd_usage, "lcd_example", 4096, NULL, 5, NULL);
     xTaskCreate(&blink_task, "blink_task", 2048, NULL, 5, NULL);
     xTaskCreate(&example_temp_sensor, "temp_sensor", 4096, NULL, 5, NULL);
-    // xTaskCreate(&log_task, "log", 2048, NULL, 5, NULL);
-    // xTaskCreate(&hello_task, "hello", 1024, NULL, 5, NULL);
-    // xTaskCreate(&display_example, "display", 2048, NULL, 5, NULL);
 }
